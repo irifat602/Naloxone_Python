@@ -12,13 +12,6 @@ import hashlib
 import sqlite3
 import base64
 import re
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-import seaborn as sns
-import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -91,19 +84,6 @@ st.markdown("""
     .ai-message {
         background: #f3e5f5;
         border-left: 4px solid #9c27b0;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #f1f3f4;
-        border-radius: 8px 8px 0px 0px;
-        padding: 12px 24px;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #007bff;
-        color: white;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -511,9 +491,288 @@ def process_csv_data(uploaded_file):
         st.error(f"Error processing CSV: {str(e)}")
         return None
 
-# Custom Report Generation
+# Enhanced Visualization Functions - FIXED VERSION
+def create_advanced_visualizations(df):
+    """Create advanced data visualizations - FIXED."""
+    if df.empty:
+        st.info("📊 No data available for visualizations.")
+        return
+
+    st.header("📈 Advanced Data Visualizations")
+
+    # Convert date column safely
+    try:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df_valid = df.dropna(subset=['date'])
+    except:
+        df_valid = df
+
+    viz_tabs = st.tabs(["📊 Overview", "🗺️ Geographic", "⏰ Temporal", "👥 Individual", "🚨 Risk Analysis"])
+
+    with viz_tabs[0]:  # Overview
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.subheader("📈 Incident Trends")
+            try:
+                monthly_counts = df_valid.groupby(df_valid['date'].dt.to_period('M')).size()
+                fig = px.line(
+                    x=[str(p) for p in monthly_counts.index], 
+                    y=monthly_counts.values,
+                    title="Monthly Incident Trends",
+                    labels={'x': 'Month', 'y': 'Number of Incidents'}
+                )
+                fig.update_traces(line=dict(width=3, color='#1f77b4'))
+                fig.update_layout(showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.info("Unable to create trend chart - insufficient date data")
+
+        with col2:
+            st.subheader("💉 Naloxone Distribution")
+            try:
+                nasal_total = df['nasal_naloxone'].sum()
+                im_total = df['intramuscular_naloxone'].sum()
+
+                if nasal_total > 0 or im_total > 0:
+                    fig = px.pie(
+                        values=[nasal_total, im_total], 
+                        names=['Nasal', 'Intramuscular'],
+                        title="Naloxone Administration Methods"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No naloxone usage data available")
+            except Exception as e:
+                st.info("Unable to create naloxone chart")
+
+        with col3:
+            st.subheader("🎯 Risk Score Distribution")
+            try:
+                if 'ai_risk_score' in df.columns:
+                    risk_data = df['ai_risk_score'].dropna()
+                    if len(risk_data) > 0:
+                        fig = px.histogram(
+                            x=risk_data, 
+                            title="AI Risk Score Distribution",
+                            labels={'x': 'Risk Score', 'y': 'Frequency'},
+                            nbins=10
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No risk score data available")
+                else:
+                    st.info("Risk scores not calculated yet")
+            except Exception as e:
+                st.info("Unable to create risk score chart")
+
+    with viz_tabs[1]:  # Geographic
+        st.subheader("🗺️ Geographic Analysis")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            try:
+                # Top locations
+                location_counts = df['location'].value_counts().head(15)
+                if not location_counts.empty:
+                    fig = px.bar(
+                        x=location_counts.values, 
+                        y=location_counts.index, 
+                        orientation='h',
+                        title="Incident Hotspots by Location",
+                        labels={'x': 'Number of Incidents', 'y': 'Location'},
+                        color=location_counts.values,
+                        color_continuous_scale='Reds'
+                    )
+                    fig.update_layout(height=500, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No location data available")
+            except Exception as e:
+                st.info("Unable to create location chart")
+
+        with col2:
+            try:
+                # Naloxone usage by location
+                location_naloxone = df.groupby('location').agg({
+                    'nasal_naloxone': 'sum',
+                    'intramuscular_naloxone': 'sum'
+                }).head(10)
+
+                if not location_naloxone.empty:
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        name='Nasal', 
+                        x=location_naloxone.index, 
+                        y=location_naloxone['nasal_naloxone'],
+                        marker_color='#1f77b4'
+                    ))
+                    fig.add_trace(go.Bar(
+                        name='Intramuscular', 
+                        x=location_naloxone.index, 
+                        y=location_naloxone['intramuscular_naloxone'],
+                        marker_color='#ff7f0e'
+                    ))
+                    fig.update_layout(
+                        title='Naloxone Usage by Location', 
+                        barmode='stack', 
+                        height=500,
+                        xaxis_title='Location',
+                        yaxis_title='Doses'
+                    )
+                    # FIXED: Use update_xaxes instead of update_xaxis
+                    fig.update_xaxes(tickangle=45)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No naloxone usage data by location")
+            except Exception as e:
+                st.info("Unable to create naloxone by location chart")
+
+    with viz_tabs[2]:  # Temporal
+        st.subheader("⏰ Temporal Patterns")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            try:
+                # Day of week analysis
+                if 'date' in df_valid.columns and not df_valid.empty:
+                    df_valid['day_of_week'] = df_valid['date'].dt.day_name()
+                    day_counts = df_valid['day_of_week'].value_counts().reindex(
+                        ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    )
+                    fig = px.bar(
+                        x=day_counts.index, 
+                        y=day_counts.values, 
+                        title="Incidents by Day of Week",
+                        labels={'x': 'Day', 'y': 'Number of Incidents'}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No date data for day-of-week analysis")
+            except Exception as e:
+                st.info("Unable to create day-of-week chart")
+
+        with col2:
+            try:
+                # Hour of day analysis (if time data available)
+                if 'time' in df.columns:
+                    time_hours = []
+                    for time_str in df['time'].dropna():
+                        try:
+                            if ':' in str(time_str):
+                                hour = int(str(time_str).split(':')[0])
+                                if 0 <= hour <= 23:
+                                    time_hours.append(hour)
+                        except:
+                            continue
+
+                    if time_hours:
+                        hourly_counts = pd.Series(time_hours).value_counts().sort_index()
+                        fig = px.bar(
+                            x=hourly_counts.index, 
+                            y=hourly_counts.values, 
+                            title="Incidents by Hour of Day",
+                            labels={'x': 'Hour', 'y': 'Number of Incidents'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No valid time data for hourly analysis")
+                else:
+                    st.info("No time data available")
+            except Exception as e:
+                st.info("Unable to create hourly chart")
+
+    with viz_tabs[3]:  # Individual Analysis
+        st.subheader("👥 Individual Community Member Analysis")
+
+        try:
+            cm_counts = df['community_member'].value_counts()
+            repeat_incidents = cm_counts[cm_counts > 1].head(10)
+
+            if not repeat_incidents.empty:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    fig = px.bar(
+                        x=repeat_incidents.values, 
+                        y=repeat_incidents.index, 
+                        orientation='h',
+                        title="Community Members with Multiple Incidents",
+                        labels={'x': 'Number of Incidents', 'y': 'Community Member'}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    # Individual risk progression
+                    frequent_person = repeat_incidents.index[0]
+                    person_data = df[df['community_member'] == frequent_person].sort_values('date')
+
+                    if 'ai_risk_score' in person_data.columns and len(person_data) > 1:
+                        fig = px.line(
+                            person_data, 
+                            x='date', 
+                            y='ai_risk_score',
+                            title=f"Risk Score Progression: {frequent_person}",
+                            labels={'date': 'Date', 'ai_risk_score': 'Risk Score'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info(f"No risk progression data for {frequent_person}")
+            else:
+                st.info("No repeat incidents found")
+        except Exception as e:
+            st.info("Unable to create individual analysis charts")
+
+    with viz_tabs[4]:  # Risk Analysis
+        st.subheader("🚨 Risk Analysis Dashboard")
+
+        try:
+            if 'ai_risk_score' in df.columns:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    # Risk vs Naloxone usage
+                    df['total_naloxone'] = df['nasal_naloxone'] + df['intramuscular_naloxone']
+                    risk_data = df[df['ai_risk_score'] > 0]
+
+                    if not risk_data.empty:
+                        fig = px.scatter(
+                            risk_data, 
+                            x='ai_risk_score', 
+                            y='total_naloxone',
+                            title="Risk Score vs Total Naloxone Usage",
+                            labels={'ai_risk_score': 'Risk Score', 'total_naloxone': 'Total Naloxone Doses'},
+                            trendline="ols"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No risk score data for correlation analysis")
+
+                with col2:
+                    # Risk distribution by location
+                    risk_by_location = df.groupby('location')['ai_risk_score'].mean().sort_values(ascending=False).head(10)
+
+                    if not risk_by_location.empty:
+                        fig = px.bar(
+                            x=risk_by_location.values, 
+                            y=risk_by_location.index, 
+                            orientation='h',
+                            title="Average Risk Score by Location",
+                            labels={'x': 'Average Risk Score', 'y': 'Location'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No risk score data by location")
+            else:
+                st.info("Risk scores not calculated yet - import data to see risk analysis")
+        except Exception as e:
+            st.info("Unable to create risk analysis charts")
+
+# Custom Report Generation - Simplified Version
 def create_custom_report_builder():
-    """Custom report builder interface."""
+    """Custom report builder interface - simplified."""
     st.header("🏗️ Custom Report Builder")
 
     df = load_incidents_from_db()
@@ -530,24 +789,22 @@ def create_custom_report_builder():
 
         # Date range selection
         st.write("**Date Range:**")
-        date_from = st.date_input("From Date")
-        date_to = st.date_input("To Date")
+        date_from = st.date_input("From Date", value=None)
+        date_to = st.date_input("To Date", value=None)
 
         # Column selection
         available_columns = ['date', 'time', 'community_member', 'staff_involved', 'location', 
                            'nasal_naloxone', 'intramuscular_naloxone', 'description', 'ai_sentiment', 'ai_risk_score']
+        available_columns = [col for col in available_columns if col in df.columns]
         selected_columns = st.multiselect("Select Columns to Include", available_columns, default=available_columns[:6])
 
         # Filters
         st.write("**Filters:**")
         location_filter = st.multiselect("Filter by Location", df['location'].unique())
-        risk_filter = st.slider("Minimum Risk Score", 0, 10, 0)
-
-        # Grouping and aggregation
-        group_by = st.selectbox("Group By", ['None', 'location', 'community_member', 'staff_involved', 'date'])
-
-        if group_by != 'None':
-            agg_functions = st.multiselect("Aggregation Functions", ['count', 'sum', 'mean', 'max', 'min'])
+        if 'ai_risk_score' in df.columns:
+            risk_filter = st.slider("Minimum Risk Score", 0, 10, 0)
+        else:
+            risk_filter = 0
 
     with col2:
         st.subheader("👁️ Preview")
@@ -555,325 +812,72 @@ def create_custom_report_builder():
         # Apply filters
         filtered_df = df.copy()
 
-        if date_from:
-            filtered_df = filtered_df[pd.to_datetime(filtered_df['date']) >= pd.Timestamp(date_from)]
+        try:
+            if date_from:
+                filtered_df = filtered_df[pd.to_datetime(filtered_df['date']) >= pd.Timestamp(date_from)]
 
-        if date_to:
-            filtered_df = filtered_df[pd.to_datetime(filtered_df['date']) <= pd.Timestamp(date_to)]
+            if date_to:
+                filtered_df = filtered_df[pd.to_datetime(filtered_df['date']) <= pd.Timestamp(date_to)]
 
-        if location_filter:
-            filtered_df = filtered_df[filtered_df['location'].isin(location_filter)]
+            if location_filter:
+                filtered_df = filtered_df[filtered_df['location'].isin(location_filter)]
 
-        if 'ai_risk_score' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['ai_risk_score'] >= risk_filter]
+            if 'ai_risk_score' in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df['ai_risk_score'] >= risk_filter]
 
-        # Apply grouping
-        if group_by != 'None' and 'agg_functions' in locals() and agg_functions:
-            if group_by in filtered_df.columns:
-                numeric_cols = ['nasal_naloxone', 'intramuscular_naloxone', 'ai_risk_score']
-                agg_dict = {}
+            preview_df = filtered_df[selected_columns].head(10) if selected_columns else filtered_df.head(10)
+            st.dataframe(preview_df, use_container_width=True)
 
-                for func in agg_functions:
-                    if func in ['count']:
-                        agg_dict['date'] = 'count'
-                    else:
-                        for col in numeric_cols:
-                            if col in filtered_df.columns:
-                                agg_dict[col] = func
-
-                if agg_dict:
-                    preview_df = filtered_df.groupby(group_by).agg(agg_dict).reset_index()
-                else:
-                    preview_df = filtered_df[selected_columns].head(10)
-            else:
-                preview_df = filtered_df[selected_columns].head(10)
-        else:
-            preview_df = filtered_df[selected_columns].head(10)
-
-        st.dataframe(preview_df, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error applying filters: {str(e)}")
 
         # Generate report
         if st.button("📊 Generate Custom Report", type="primary"):
             if report_name:
-                # Create report configuration
-                report_config = {
-                    'name': report_name,
-                    'date_from': str(date_from) if date_from else None,
-                    'date_to': str(date_to) if date_to else None,
-                    'columns': selected_columns,
-                    'location_filter': location_filter,
-                    'risk_filter': risk_filter,
-                    'group_by': group_by,
-                    'agg_functions': agg_functions if group_by != 'None' and 'agg_functions' in locals() else []
-                }
-
-                # Save report configuration
-                save_custom_report(report_name, report_config, st.session_state.username)
-
-                # Generate Excel report
-                excel_file = generate_custom_excel_report(filtered_df, report_config)
-                if excel_file:
-                    st.success(f"✅ Custom report '{report_name}' generated successfully!")
-                    st.download_button(
-                        label="📥 Download Custom Report",
-                        data=excel_file,
-                        file_name=f"{report_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                try:
+                    # Generate Excel report
+                    excel_file = generate_custom_excel_report(filtered_df, selected_columns, report_name)
+                    if excel_file:
+                        st.success(f"✅ Custom report '{report_name}' generated successfully!")
+                        st.download_button(
+                            label="📥 Download Custom Report",
+                            data=excel_file,
+                            file_name=f"{report_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                except Exception as e:
+                    st.error(f"Error generating report: {str(e)}")
             else:
                 st.error("Please enter a report name.")
 
-def save_custom_report(report_name, report_config, created_by):
-    """Save custom report configuration."""
-    conn = sqlite3.connect('naloxone_incidents.db')
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR REPLACE INTO custom_reports (report_name, report_config, created_by)
-        VALUES (?, ?, ?)
-    """, (report_name, json.dumps(report_config), created_by))
-    conn.commit()
-    conn.close()
-
-def get_saved_reports():
-    """Get all saved custom reports."""
-    conn = sqlite3.connect('naloxone_incidents.db')
-    df = pd.read_sql_query("""
-        SELECT id, report_name, created_by, created_at, last_modified
-        FROM custom_reports ORDER BY created_at DESC
-    """, conn)
-    conn.close()
-    return df
-
-def generate_custom_excel_report(df, config):
-    """Generate custom Excel report based on configuration."""
+def generate_custom_excel_report(df, columns, report_name):
+    """Generate custom Excel report."""
     if df.empty:
         return None
 
-    output = io.BytesIO()
+    try:
+        output = io.BytesIO()
 
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Main data sheet
-        if config.get('group_by') != 'None' and config.get('agg_functions'):
-            # Grouped data
-            group_by = config['group_by']
-            numeric_cols = ['nasal_naloxone', 'intramuscular_naloxone', 'ai_risk_score']
-            agg_dict = {}
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Main data sheet
+            selected_df = df[columns] if columns else df
+            selected_df.to_excel(writer, sheet_name='Report Data', index=False)
 
-            for func in config['agg_functions']:
-                if func == 'count':
-                    agg_dict['date'] = 'count'
-                else:
-                    for col in numeric_cols:
-                        if col in df.columns:
-                            agg_dict[col] = func
+            # Summary sheet
+            summary_data = {
+                'Report Name': [report_name],
+                'Generated On': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
+                'Total Records': [len(df)],
+                'Columns Included': [len(columns) if columns else len(df.columns)]
+            }
+            pd.DataFrame(summary_data).to_excel(writer, sheet_name='Report Info', index=False)
 
-            if agg_dict and group_by in df.columns:
-                grouped_df = df.groupby(group_by).agg(agg_dict).reset_index()
-                grouped_df.to_excel(writer, sheet_name='Grouped Analysis', index=False)
+        output.seek(0)
+        return output
 
-        # Original data
-        selected_df = df[config['columns']] if config['columns'] else df
-        selected_df.to_excel(writer, sheet_name='Raw Data', index=False)
-
-        # Summary sheet
-        summary_data = {
-            'Report Name': [config['name']],
-            'Generated On': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
-            'Total Records': [len(df)],
-            'Date Range': [f"{config.get('date_from', 'All')} to {config.get('date_to', 'All')}"],
-            'Filters Applied': [f"Location: {config.get('location_filter', 'None')}, Risk ≥ {config.get('risk_filter', 0)}"]
-        }
-        pd.DataFrame(summary_data).to_excel(writer, sheet_name='Report Info', index=False)
-
-    output.seek(0)
-    return output
-
-# Enhanced Visualization Functions
-def create_advanced_visualizations(df):
-    """Create advanced data visualizations."""
-    if df.empty:
-        st.info("📊 No data available for visualizations.")
-        return
-
-    st.header("📈 Advanced Data Visualizations")
-
-    # Convert date column
-    df['date'] = pd.to_datetime(df['date'], errors='coerce')
-    df_valid = df.dropna(subset=['date'])
-
-    viz_tabs = st.tabs(["📊 Overview", "🗺️ Geographic", "⏰ Temporal", "👥 Individual", "🚨 Risk Analysis", "📋 Comparative"])
-
-    with viz_tabs[0]:  # Overview
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.subheader("📈 Incident Trends")
-            monthly_counts = df_valid.groupby(df_valid['date'].dt.to_period('M')).size()
-            fig = px.line(x=[str(p) for p in monthly_counts.index], y=monthly_counts.values,
-                         title="Monthly Incident Trends")
-            fig.update_traces(line=dict(width=3))
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            st.subheader("💉 Naloxone Distribution")
-            nasal_total = df['nasal_naloxone'].sum()
-            im_total = df['intramuscular_naloxone'].sum()
-            fig = px.pie(values=[nasal_total, im_total], names=['Nasal', 'Intramuscular'],
-                        title="Naloxone Administration Methods")
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col3:
-            st.subheader("🎯 Risk Score Distribution")
-            if 'ai_risk_score' in df.columns:
-                fig = px.histogram(df, x='ai_risk_score', title="AI Risk Score Distribution",
-                                 labels={'ai_risk_score': 'Risk Score', 'count': 'Frequency'})
-                st.plotly_chart(fig, use_container_width=True)
-
-    with viz_tabs[1]:  # Geographic
-        st.subheader("🗺️ Geographic Analysis")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            # Top locations heatmap-style
-            location_counts = df['location'].value_counts().head(15)
-            fig = px.bar(x=location_counts.values, y=location_counts.index, orientation='h',
-                        title="Incident Hotspots by Location", color=location_counts.values,
-                        color_continuous_scale='Reds')
-            fig.update_layout(height=500)
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            # Naloxone usage by location
-            location_naloxone = df.groupby('location').agg({
-                'nasal_naloxone': 'sum',
-                'intramuscular_naloxone': 'sum'
-            }).head(10)
-
-            fig = go.Figure()
-            fig.add_trace(go.Bar(name='Nasal', x=location_naloxone.index, y=location_naloxone['nasal_naloxone']))
-            fig.add_trace(go.Bar(name='Intramuscular', x=location_naloxone.index, y=location_naloxone['intramuscular_naloxone']))
-            fig.update_layout(title='Naloxone Usage by Location', barmode='stack', height=500)
-            fig.update_xaxis(tickangle=45)
-            st.plotly_chart(fig, use_container_width=True)
-
-    with viz_tabs[2]:  # Temporal
-        st.subheader("⏰ Temporal Patterns")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            # Day of week analysis
-            df_valid['day_of_week'] = df_valid['date'].dt.day_name()
-            day_counts = df_valid['day_of_week'].value_counts().reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
-            fig = px.bar(x=day_counts.index, y=day_counts.values, title="Incidents by Day of Week")
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            # Hour of day analysis (if time data available)
-            if 'time' in df.columns:
-                time_hours = []
-                for time_str in df['time'].dropna():
-                    try:
-                        if ':' in str(time_str):
-                            hour = int(str(time_str).split(':')[0])
-                            if 0 <= hour <= 23:
-                                time_hours.append(hour)
-                    except:
-                        continue
-
-                if time_hours:
-                    hourly_counts = pd.Series(time_hours).value_counts().sort_index()
-                    fig = px.bar(x=hourly_counts.index, y=hourly_counts.values, title="Incidents by Hour of Day")
-                    st.plotly_chart(fig, use_container_width=True)
-
-    with viz_tabs[3]:  # Individual Analysis
-        st.subheader("👥 Individual Community Member Analysis")
-
-        cm_counts = df['community_member'].value_counts()
-        repeat_incidents = cm_counts[cm_counts > 1].head(10)
-
-        if not repeat_incidents.empty:
-            col1, col2 = st.columns(2)
-
-            with col1:
-                fig = px.bar(x=repeat_incidents.values, y=repeat_incidents.index, orientation='h',
-                           title="Community Members with Multiple Incidents")
-                st.plotly_chart(fig, use_container_width=True)
-
-            with col2:
-                # Individual risk progression
-                frequent_person = repeat_incidents.index[0]
-                person_data = df[df['community_member'] == frequent_person].sort_values('date')
-
-                if 'ai_risk_score' in person_data.columns and len(person_data) > 1:
-                    fig = px.line(person_data, x='date', y='ai_risk_score',
-                                 title=f"Risk Score Progression: {frequent_person}")
-                    st.plotly_chart(fig, use_container_width=True)
-
-    with viz_tabs[4]:  # Risk Analysis
-        st.subheader("🚨 Risk Analysis Dashboard")
-
-        if 'ai_risk_score' in df.columns:
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Risk vs Naloxone usage
-                df['total_naloxone'] = df['nasal_naloxone'] + df['intramuscular_naloxone']
-                fig = px.scatter(df, x='ai_risk_score', y='total_naloxone',
-                               title="Risk Score vs Total Naloxone Usage",
-                               trendline="ols")
-                st.plotly_chart(fig, use_container_width=True)
-
-            with col2:
-                # Risk distribution by location
-                risk_by_location = df.groupby('location')['ai_risk_score'].mean().sort_values(ascending=False).head(10)
-                fig = px.bar(x=risk_by_location.values, y=risk_by_location.index, orientation='h',
-                           title="Average Risk Score by Location")
-                st.plotly_chart(fig, use_container_width=True)
-
-    with viz_tabs[5]:  # Comparative
-        st.subheader("📋 Comparative Analysis")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            # Before/After comparison (if applicable)
-            st.subheader("📊 Monthly Comparison")
-            monthly_stats = df_valid.groupby(df_valid['date'].dt.to_period('M')).agg({
-                'nasal_naloxone': 'sum',
-                'intramuscular_naloxone': 'sum',
-                'ai_risk_score': 'mean'
-            }).tail(6)
-
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            fig.add_trace(
-                go.Scatter(x=[str(p) for p in monthly_stats.index], y=monthly_stats['nasal_naloxone'], name="Nasal Doses"),
-                secondary_y=False
-            )
-            fig.add_trace(
-                go.Scatter(x=[str(p) for p in monthly_stats.index], y=monthly_stats['ai_risk_score'], name="Avg Risk Score"),
-                secondary_y=True
-            )
-            fig.update_yaxes(title_text="Naloxone Doses", secondary_y=False)
-            fig.update_yaxes(title_text="Average Risk Score", secondary_y=True)
-            fig.update_layout(title="Doses vs Risk Over Time")
-            st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
-            # Staff efficiency comparison
-            st.subheader("👨‍⚕️ Staff Performance")
-            all_staff = []
-            for staff_list in df['staff_involved'].dropna():
-                if staff_list and str(staff_list).strip():
-                    staff_names = [name.strip() for name in str(staff_list).split(',')]
-                    all_staff.extend(staff_names)
-
-            if all_staff:
-                staff_counts = pd.Series(all_staff).value_counts().head(8)
-                fig = px.bar(x=staff_counts.values, y=staff_counts.index, orientation='h',
-                           title="Staff Response Frequency")
-                st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error creating Excel file: {str(e)}")
+        return None
 
 # Chat interface for natural language queries
 def create_chat_interface():
@@ -904,7 +908,10 @@ def create_chat_interface():
         st.session_state.chat_history.append({"role": "assistant", "content": response})
 
         # Save to database
-        save_chat_to_db(st.session_state.username, user_query, response)
+        try:
+            save_chat_to_db(st.session_state.username, user_query, response)
+        except:
+            pass  # Don't fail if chat saving fails
 
     # Display chat history
     for message in st.session_state.chat_history:
@@ -927,7 +934,7 @@ def save_chat_to_db(user_id, query, response):
     conn.commit()
     conn.close()
 
-# User Management Interface
+# User Management Interface - Simplified
 def create_user_management():
     """Create user management interface for admins."""
     if st.session_state.role != 'admin':
@@ -936,16 +943,15 @@ def create_user_management():
 
     st.header("👥 User Management")
 
-    tab1, tab2, tab3 = st.tabs(["👨‍💼 All Users", "➕ Add User", "📊 User Activity"])
+    tab1, tab2 = st.tabs(["👨‍💼 All Users", "➕ Add User"])
 
     with tab1:
         st.subheader("Current Users")
         users_df = get_all_users()
 
         if not users_df.empty:
-            # Display users with action buttons
             for _, user in users_df.iterrows():
-                col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
                 with col1:
                     st.write(f"**{user['username']}** ({user['role']})")
@@ -958,23 +964,17 @@ def create_user_management():
 
                 with col3:
                     if user['last_login']:
-                        st.caption(f"Last: {user['last_login'][:10]}")
+                        st.caption(f"Last: {str(user['last_login'])[:10]}")
                     else:
                         st.caption("Never logged in")
 
                 with col4:
-                    if user['username'] != 'admin':  # Don't allow deactivating admin
+                    if user['username'] != 'admin':
                         new_status = not user['active']
                         action = "Activate" if new_status else "Deactivate"
                         if st.button(action, key=f"toggle_{user['id']}"):
                             update_user_status(user['id'], new_status)
                             st.rerun()
-
-                with col5:
-                    if user['username'] != st.session_state.username:  # Don't allow deleting own account
-                        if st.button("🗑️", key=f"delete_{user['id']}", help="Delete User"):
-                            # Add confirmation logic here
-                            st.warning("Delete functionality requires confirmation dialog")
 
                 st.divider()
 
@@ -991,52 +991,34 @@ def create_user_management():
 
             with col2:
                 new_full_name = st.text_input("Full Name", placeholder="John Doe")
+                auto_generate = st.checkbox("Auto-generate secure password", value=True)
                 new_password = st.text_input("Password*", type="password", 
                                            placeholder="Leave blank for auto-generated password")
-                auto_generate = st.checkbox("Auto-generate secure password", value=True)
 
             submitted = st.form_submit_button("👤 Create User", type="primary")
 
             if submitted:
                 if new_username:
-                    # Generate password if needed
-                    if auto_generate or not new_password:
-                        import secrets
-                        import string
-                        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-                        new_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+                    try:
+                        # Generate password if needed
+                        if auto_generate or not new_password:
+                            import secrets
+                            import string
+                            alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+                            new_password = ''.join(secrets.choice(alphabet) for _ in range(12))
 
-                    # Create user
-                    if create_user(new_username, new_password, new_role, new_email, 
-                                 new_full_name, st.session_state.username):
-                        st.success(f"✅ User '{new_username}' created successfully!")
-                        st.info(f"🔑 Password: `{new_password}`")
-                        st.warning("⚠️ Please save this password securely. It won't be shown again.")
-                    else:
-                        st.error("❌ Failed to create user. Username may already exist.")
+                        # Create user
+                        if create_user(new_username, new_password, new_role, new_email, 
+                                     new_full_name, st.session_state.username):
+                            st.success(f"✅ User '{new_username}' created successfully!")
+                            st.info(f"🔑 Password: `{new_password}`")
+                            st.warning("⚠️ Please save this password securely. It won't be shown again.")
+                        else:
+                            st.error("❌ Failed to create user. Username may already exist.")
+                    except Exception as e:
+                        st.error(f"Error creating user: {str(e)}")
                 else:
                     st.error("⚠️ Username is required.")
-
-    with tab3:
-        st.subheader("📊 User Activity Overview")
-
-        # Chat activity
-        conn = sqlite3.connect('naloxone_incidents.db')
-        try:
-            chat_activity = pd.read_sql_query("""
-                SELECT user_id, COUNT(*) as query_count, MAX(created_at) as last_query
-                FROM chat_history 
-                GROUP BY user_id 
-                ORDER BY query_count DESC
-            """, conn)
-
-            if not chat_activity.empty:
-                st.subheader("💬 Chat Query Activity")
-                st.dataframe(chat_activity, use_container_width=True)
-        except:
-            st.info("No chat activity data available.")
-        finally:
-            conn.close()
 
 # Login page
 def login_page():
@@ -1076,9 +1058,9 @@ def login_page():
                 else:
                     st.error("⚠️ Please enter both username and password")
 
-# Main dashboard
+# Main dashboard - Simplified
 def main_dashboard():
-    """Enhanced main dashboard."""
+    """Enhanced main dashboard - simplified."""
     # Header with user info
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -1145,34 +1127,6 @@ def main_dashboard():
                 else:
                     st.markdown('<div class="metric-card"><h3>0</h3><p>High Risk</p></div>', unsafe_allow_html=True)
 
-            # Quick insights
-            st.subheader("📊 Quick Insights")
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                # Top location
-                top_location = df['location'].value_counts().head(1)
-                if not top_location.empty:
-                    st.info(f"🏢 **Most Common Location:** {top_location.index[0]} ({top_location.values[0]} incidents)")
-
-            with col2:
-                # Recent trend
-                df['date'] = pd.to_datetime(df['date'], errors='coerce')
-                current_month = df[df['date'].dt.month == datetime.now().month]
-                prev_month = df[df['date'].dt.month == datetime.now().month - 1]
-
-                if not current_month.empty and not prev_month.empty:
-                    change = len(current_month) - len(prev_month)
-                    trend = "📈 Increasing" if change > 0 else "📉 Decreasing" if change < 0 else "➡️ Stable"
-                    st.info(f"📅 **Monthly Trend:** {trend} ({change:+d})")
-
-            with col3:
-                # High-risk alerts
-                if 'ai_risk_score' in df.columns:
-                    high_risk_incidents = df[df['ai_risk_score'] >= 8]
-                    if not high_risk_incidents.empty:
-                        st.warning(f"⚠️ **Critical Alert:** {len(high_risk_incidents)} very high-risk incidents need immediate attention!")
-
     with tabs[1]:  # Data Import
         st.header("📁 Data Import & Management")
 
@@ -1200,11 +1154,14 @@ def main_dashboard():
 
                         # Import button
                         if st.button("💾 Import Data with AI Analysis", type="primary"):
-                            with st.spinner("🤖 Importing data and running AI analysis..."):
-                                save_incidents_to_db(processed_df, st.session_state.username)
-                                st.success("🎉 Data successfully imported with AI insights!")
-                                st.balloons()
-                                st.rerun()
+                            try:
+                                with st.spinner("🤖 Importing data and running AI analysis..."):
+                                    save_incidents_to_db(processed_df, st.session_state.username)
+                                    st.success("🎉 Data successfully imported with AI insights!")
+                                    st.balloons()
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Error importing data: {str(e)}")
 
         with col2:
             st.subheader("📊 Current Data Status")
@@ -1213,18 +1170,21 @@ def main_dashboard():
             st.metric("📈 Total Incidents", current_count)
 
             if not df.empty:
-                date_range = f"{df['date'].min()} to {df['date'].max()}"
-                st.success(f"📅 **Date Range:** {date_range}")
+                try:
+                    date_range = f"{df['date'].min()} to {df['date'].max()}"
+                    st.success(f"📅 **Date Range:** {date_range}")
 
-                unique_locations = df['location'].nunique()
-                st.info(f"📍 **Locations:** {unique_locations}")
+                    unique_locations = df['location'].nunique()
+                    st.info(f"📍 **Locations:** {unique_locations}")
 
-                unique_people = df['community_member'].nunique()
-                st.info(f"👥 **People:** {unique_people}")
+                    unique_people = df['community_member'].nunique()
+                    st.info(f"👥 **People:** {unique_people}")
 
-                if 'ai_risk_score' in df.columns:
-                    avg_risk = df['ai_risk_score'].mean()
-                    st.warning(f"🎯 **Avg Risk Score:** {avg_risk:.1f}/10")
+                    if 'ai_risk_score' in df.columns:
+                        avg_risk = df['ai_risk_score'].mean()
+                        st.warning(f"🎯 **Avg Risk Score:** {avg_risk:.1f}/10")
+                except:
+                    st.info("Data statistics loading...")
 
     with tabs[2]:  # Analytics
         create_advanced_visualizations(df)
@@ -1234,60 +1194,6 @@ def main_dashboard():
 
     with tabs[4]:  # Reports
         create_custom_report_builder()
-
-        st.divider()
-
-        # Quick export options
-        if not df.empty:
-            st.subheader("🚀 Quick Exports")
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                if st.button("📊 Generate Excel Report", use_container_width=True):
-                    excel_data = generate_custom_excel_report(df, {'name': 'Quick Export', 'columns': df.columns.tolist()})
-                    st.download_button(
-                        "📥 Download Excel",
-                        excel_data,
-                        f"naloxone_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-
-            with col2:
-                csv_data = df.to_csv(index=False)
-                st.download_button(
-                    "📄 Download CSV",
-                    csv_data,
-                    f"naloxone_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                    "text/csv",
-                    use_container_width=True
-                )
-
-            with col3:
-                # Summary report
-                summary = f"""NALOXONE INCIDENT SUMMARY REPORT
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-User: {st.session_state.username}
-
-OVERVIEW:
-• Total Incidents: {len(df)}
-• Date Range: {df['date'].min()} to {df['date'].max()}
-• Total Naloxone Doses: {df['nasal_naloxone'].sum() + df['intramuscular_naloxone'].sum()}
-• Unique Locations: {df['location'].nunique()}
-• Community Members: {df['community_member'].nunique()}
-
-TOP LOCATIONS:
-{df['location'].value_counts().head().to_string()}
-
-HIGH-RISK INCIDENTS:
-{len(df[df['ai_risk_score'] >= 6]) if 'ai_risk_score' in df.columns else 'Not calculated'}
-"""
-                st.download_button(
-                    "📋 Download Summary",
-                    summary,
-                    f"naloxone_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                    "text/plain",
-                    use_container_width=True
-                )
 
     # User Management tab (admin only)
     if st.session_state.role == 'admin':
@@ -1300,52 +1206,8 @@ HIGH-RISK INCIDENTS:
             if df.empty:
                 st.info("📊 No data available. Import data first.")
             else:
-                # Advanced filtering
-                with st.expander("🔍 Advanced Filters"):
-                    col1, col2, col3, col4 = st.columns(4)
-
-                    with col1:
-                        location_filter = st.multiselect("Filter by Location", df['location'].unique())
-
-                    with col2:
-                        date_from = st.date_input("From Date")
-
-                    with col3:
-                        date_to = st.date_input("To Date")
-
-                    with col4:
-                        if 'ai_risk_score' in df.columns:
-                            risk_filter = st.slider("Minimum Risk Score", 0, 10, 0)
-                        else:
-                            risk_filter = 0
-
-                # Apply filters
-                filtered_df = df.copy()
-
-                if location_filter:
-                    filtered_df = filtered_df[filtered_df['location'].isin(location_filter)]
-
-                if date_from:
-                    filtered_df = filtered_df[pd.to_datetime(filtered_df['date']) >= pd.Timestamp(date_from)]
-
-                if date_to:
-                    filtered_df = filtered_df[pd.to_datetime(filtered_df['date']) <= pd.Timestamp(date_to)]
-
-                if 'ai_risk_score' in filtered_df.columns and risk_filter > 0:
-                    filtered_df = filtered_df[filtered_df['ai_risk_score'] >= risk_filter]
-
-                st.subheader(f"📊 Showing {len(filtered_df)} of {len(df)} incidents")
-
-                # Display data with enhanced formatting
-                display_columns = ['date', 'time', 'community_member', 'location', 'staff_involved', 
-                                 'nasal_naloxone', 'intramuscular_naloxone', 'ai_sentiment', 'ai_risk_score']
-                available_columns = [col for col in display_columns if col in filtered_df.columns]
-
-                st.dataframe(
-                    filtered_df[available_columns].sort_values('date', ascending=False),
-                    use_container_width=True,
-                    hide_index=True
-                )
+                # Display data
+                st.dataframe(df, use_container_width=True)
     else:
         with tabs[5]:  # Data View (non-admin)
             st.header("📋 Data View")
@@ -1353,25 +1215,7 @@ HIGH-RISK INCIDENTS:
             if df.empty:
                 st.info("📊 No data available.")
             else:
-                # Basic filtering for non-admin users
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    location_filter = st.selectbox("Filter by Location", ['All'] + sorted(df['location'].unique().tolist()))
-
-                with col2:
-                    date_filter = st.date_input("Filter by Date")
-
-                # Apply filters
-                filtered_df = df.copy()
-
-                if location_filter != 'All':
-                    filtered_df = filtered_df[filtered_df['location'] == location_filter]
-
-                if date_filter:
-                    filtered_df = filtered_df[pd.to_datetime(filtered_df['date']).dt.date == date_filter]
-
-                st.dataframe(filtered_df, use_container_width=True)
+                st.dataframe(df, use_container_width=True)
 
 # Main execution
 if __name__ == "__main__":
